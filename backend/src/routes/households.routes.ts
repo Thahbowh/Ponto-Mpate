@@ -1,0 +1,77 @@
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../lib/prisma";
+import { authenticate } from "../middleware/authenticate";
+import { authorize } from "../middleware/authorize";
+
+const router = Router();
+router.use(authenticate);
+
+const householdSchema = z.object({
+  householdName: z.string().trim().min(2).max(120),
+  wardId: z.string().min(1),
+  reference: z.string().trim().min(3).max(40).optional(),
+});
+
+router.get("/", async (req, res, next) => {
+  try {
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const wardId = typeof req.query.wardId === "string" ? req.query.wardId : undefined;
+
+    const households = await prisma.household.findMany({
+      where: {
+        ...(wardId ? { wardId } : {}),
+        ...(search
+          ? {
+              OR: [
+                { householdName: { contains: search } },
+                { reference: { contains: search } },
+              ],
+            }
+          : {}),
+      },
+      include: { ward: { select: { id: true, name: true } } },
+      orderBy: { reference: "asc" },
+      take: 200,
+    });
+    res.json({ success: true, data: households });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/", authorize("ADMIN"), async (req, res, next) => {
+  try {
+    const input = householdSchema.parse(req.body);
+
+    const ward = await prisma.ward.findUnique({ where: { id: input.wardId } });
+    if (!ward || !ward.isActive) {
+      return res
+        .status(400)
+        .json({ success: false, error: { message: "Ward does not exist or is inactive" } });
+    }
+
+    const duplicate = await prisma.household.findFirst({
+      where: { householdName: input.householdName, wardId: input.wardId },
+    });
+    if (duplicate) {
+      return res.status(409).json({
+        success: false,
+        error: { message: "This household is already registered in that ward" },
+      });
+    }
+
+    const count = await prisma.household.count();
+    const reference = input.reference ?? `HH-${String(count + 1).padStart(4, "0")}`;
+
+    const household = await prisma.household.create({
+      data: { householdName: input.householdName, wardId: input.wardId, reference },
+      include: { ward: { select: { id: true, name: true } } },
+    });
+    res.status(201).json({ success: true, data: household });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;
