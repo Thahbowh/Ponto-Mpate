@@ -22,3 +22,15 @@ npm-debug.log*
 # Operating system
 .DS_Store
 Thumbs.db
+
+# Exclude agent skill folders
+agents/skills/
+.claude/skills/
+.cursor/skills/
+.devin/skills/
+
+# Backend agent skill folders
+backend/agents/skills/
+backend/.claude/skills/
+backend/.cursor/skills/
+backend/.devin/skills/
