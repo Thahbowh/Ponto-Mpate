@@ -132,6 +132,7 @@ export interface RecentPayment {
   event: string;
 }
 
+
 export interface Dashboard {
   scope: "all" | "event";
   totals: Totals;
@@ -144,12 +145,6 @@ export interface Dashboard {
     totalWards: number;
     totalHouseholds: number;
   };
-
-  totals: Totals;
-  allEventsTotals: Totals;
-  events: DashboardEvent[];
-  wards: DashboardWard[];
-  recentPayments: RecentPayment[];
 }
 
 export interface Reconciliation {

@@ -1,4 +1,4 @@
-import { View, Text } from "lucide-react";
+
 
 // components/app/WardHeader.tsx
 type WardHeaderProps = {
