@@ -34,3 +34,5 @@ backend/agents/skills/
 backend/.claude/skills/
 backend/.cursor/skills/
 backend/.devin/skills/
+# Netlify generated files
+.netlify/
