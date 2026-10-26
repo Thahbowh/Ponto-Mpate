@@ -58,6 +58,15 @@ router.get("/", async (req, res, next) => {
   try {
     const eventId = typeof req.query.eventId === "string" ? req.query.eventId : undefined;
 
+    const [totalWards, totalHouseholds] = await Promise.all([
+  prisma.ward.count({
+    where: { isActive: true },
+  }),
+  prisma.household.count({
+    where: { isActive: true },
+  }),
+]);
+
     const events = await prisma.funeralEvent.findMany({
       where: { status: { not: "CANCELLED" } },
       orderBy: { eventDate: "desc" },
@@ -128,8 +137,14 @@ router.get("/", async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        scope: eventId ? "event" : "all",
-        totals: format(scoped),
+  scope: eventId ? "event" : "all",
+
+  community: {
+    totalWards,
+    totalHouseholds,
+  },
+
+  totals: format(scoped),
         allEventsTotals: format(overall),
         events: events.map((e) => ({
           id: e.id,

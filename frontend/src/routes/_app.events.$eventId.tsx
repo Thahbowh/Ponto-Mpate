@@ -7,6 +7,7 @@ import { FormField, inputClass } from "@/components/ui/FormField";
 import { StatCard } from "@/components/ui/StatCard";
 import { RecordPaymentLink } from "@/features/payments/RecordPaymentLink";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { CloseEventButton } from "@/features/events/CloseEventButton";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/States";
 
 export const Route = createFileRoute("/_app/events/$eventId")({
@@ -58,14 +59,16 @@ function EventDetailPage() {
               {data.event.homeWard.name} · {formatRand(data.event.contributionAmount)} per household
             </p>
             <p className="text-sm text-slate-600">
-              Participating wards: {data.event.eligibleWards.map((w) => w.name).join(", ")}
+              Paying ward: {data.event.eligibleWards.map((w) => w.name).join(", ")}{data.event.bereavedHousehold ? ` - exempt from paying: ${data.event.bereavedHousehold.householdName} (${data.event.bereavedHousehold.reference})` : ""}
             </p>
+            <p className="text-sm text-slate-600">Messages sent to members: {data.event.messagesSent}</p>
             {data.event.status !== "ACTIVE" ? (
               <p role="status" className="rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-700">
                 This event is {data.event.status === "CLOSED" ? "closed" : "cancelled"}. No further payments
                 can be recorded.
               </p>
             ) : null}
+            <CloseEventButton eventId={data.event.id} reference={data.event.reference} title={data.event.title} status={data.event.status} onClosed={refetch} />
           </header>
 
           <section aria-label="Event totals" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -193,5 +196,8 @@ function EventDetailPage() {
     </div>
   );
 }
+
+
+
 
 

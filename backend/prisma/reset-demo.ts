@@ -58,6 +58,7 @@ async function main() {
 
   // Children first, so nothing is blocked by a foreign key
   await prisma.$transaction([
+    prisma.notification.deleteMany(),
     prisma.voucherTransaction.deleteMany(),
     prisma.paymentAttempt.deleteMany(),
     prisma.receipt.deleteMany(),
@@ -110,6 +111,7 @@ async function main() {
       data: WARDS[w].households.map((surname, i) => ({
         reference: `DEMO-W${w + 1}-${String(i + 1).padStart(3, "0")}`,
         householdName: `Demo ${surname} household`,
+        houseNumber: String(10 + w * 20 + i * 2),
         wardId: wards[w].id,
       })),
     });
@@ -121,14 +123,30 @@ async function main() {
     data: { userId: member.id, householdId: memberHousehold.id, status: "APPROVED", decidedAt: new Date() },
   });
 
+  // A second member, in Ward 1, to show that messages only go to the funeral's own ward
+  const member1 = await prisma.user.create({
+    data: { email: "member.ward1@demo.example", name: "Demo Member (Ward 1)", passwordHash: await bcrypt.hash(memberPw, 10), role: "MEMBER" },
+  });
+  const member1Household = await prisma.household.findUniqueOrThrow({ where: { reference: "DEMO-W1-002" } });
+  await prisma.householdMember.create({
+    data: { userId: member1.id, householdId: member1Household.id, status: "APPROVED", decidedAt: new Date() },
+  });
   // Helpers for building events and payments
   let payNo = 0;
   let handoverNo = 0;
   const paidCents = new Map<string, number>();
 
-  async function createEvent(reference: string, title: string, eventDate: Date, status: "ACTIVE" | "CLOSED", homeIndex: number) {
-    const idxs = [homeIndex - 1, homeIndex, homeIndex + 1].filter((i) => i >= 0 && i < wards.length);
-    const eligibleWardIds = idxs.map((i) => wards[i].id);
+  async function createEvent(
+    reference: string,
+    title: string,
+    eventDate: Date,
+    status: "ACTIVE" | "CLOSED",
+    homeIndex: number,
+    bereavedRef: string
+  ) {
+    // Only the funeral's own ward contributes, and the household holding the funeral is exempt
+    const home = wards[homeIndex];
+    const bereaved = await prisma.household.findUniqueOrThrow({ where: { reference: bereavedRef } });
     const event = await prisma.funeralEvent.create({
       data: {
         reference,
@@ -136,16 +154,15 @@ async function main() {
         eventDate,
         status,
         contributionAmount: AMOUNT,
-        homeWardId: wards[homeIndex].id,
+        homeWardId: home.id,
+        bereavedHouseholdId: bereaved.id,
         createdById: admin.id,
         createdAt: eventDate,
       },
     });
-    await prisma.eventEligibleWard.createMany({
-      data: eligibleWardIds.map((wardId) => ({ eventId: event.id, wardId })),
-    });
+    await prisma.eventEligibleWard.createMany({ data: [{ eventId: event.id, wardId: home.id }] });
     const households = await prisma.household.findMany({
-      where: { wardId: { in: eligibleWardIds }, isActive: true },
+      where: { wardId: home.id, isActive: true, id: { not: bereaved.id } },
       orderBy: { reference: "asc" },
     });
     await prisma.contributionObligation.createMany({
@@ -162,7 +179,7 @@ async function main() {
         action: "EVENT_CREATED",
         entityType: "FuneralEvent",
         entityId: event.id,
-        details: { reference, households: households.length, contributionAmount: AMOUNT },
+        details: { reference, exemptHousehold: bereavedRef, households: households.length, contributionAmount: AMOUNT },
         createdAt: eventDate,
       },
     });
@@ -241,18 +258,19 @@ async function main() {
     }
   }
 
-  // Event 1: closed history. 13 paid (10 cash, 3 transfer), 1 part payment, 1 unpaid. Cash fully handed over.
+  // Event 1: closed history. Ward 1 holds the funeral and the Zulu household is exempt, so 4 households pay.
+  // 2 paid cash, 1 paid by transfer, 1 part payment. All cash handed over.
   const e1Date = daysAgo(40);
-  const e1 = await createEvent(`FE-${YEAR}-001`, "Demo funeral event 1", e1Date, "CLOSED", 1);
+  const e1 = await createEvent(`FE-${YEAR}-001`, "Demo funeral event 1", e1Date, "CLOSED", 0, "DEMO-W1-005");
   for (let i = 0; i < e1.refs.length; i++) {
     const ob = e1.byRef.get(e1.refs[i])!;
     const at = minutesAfter(e1Date, 60 * (i + 1));
-    if (i < 10) await pay(e1.event.id, ob, "12.00", "CASH", at);
-    else if (i < 13) await pay(e1.event.id, ob, "12.00", "EFT", at);
-    else if (i === 13) await pay(e1.event.id, ob, "6.00", "CASH", at);
+    if (i < 2) await pay(e1.event.id, ob, "12.00", "CASH", at);
+    else if (i === 2) await pay(e1.event.id, ob, "12.00", "EFT", at);
+    else await pay(e1.event.id, ob, "6.00", "CASH", at);
   }
-  await handover(e1.event.id, "100.00", "First handover", minutesAfter(e1Date, 60 * 24));
-  await handover(e1.event.id, "26.00", "Remaining cash", minutesAfter(e1Date, 60 * 26));
+  await handover(e1.event.id, "20.00", "First handover", minutesAfter(e1Date, 60 * 24));
+  await handover(e1.event.id, "10.00", "Remaining cash", minutesAfter(e1Date, 60 * 26));
   await prisma.auditLog.create({
     data: {
       userId: admin.id,
@@ -264,15 +282,13 @@ async function main() {
     },
   });
 
-  // Event 2: active. 4 paid cash/transfer, 1 part payment, cash recorded but no handover yet.
+  // Event 2: active. Ward 2 holds the funeral and the Tau household is exempt, so 4 households pay.
+  // 1 paid cash and 1 part payment (cash), with no handover recorded yet. The demo member (Mohapi) still owes.
   const e2Date = daysAgo(10);
-  const e2 = await createEvent(`FE-${YEAR}-002`, "Demo funeral event 2", e2Date, "ACTIVE", 0);
+  const e2 = await createEvent(`FE-${YEAR}-002`, "Demo funeral event 2", e2Date, "ACTIVE", 1, "DEMO-W2-005");
   const plan: [string, string, "CASH" | "EFT"][] = [
-    ["DEMO-W1-001", "12.00", "CASH"],
-    ["DEMO-W1-002", "12.00", "CASH"],
-    ["DEMO-W1-003", "12.00", "CASH"],
-    ["DEMO-W1-004", "6.00", "CASH"],
-    ["DEMO-W2-001", "12.00", "EFT"],
+    ["DEMO-W2-001", "12.00", "CASH"],
+    ["DEMO-W2-002", "6.00", "CASH"],
   ];
   for (let i = 0; i < plan.length; i++) {
     const [ref, amount, method] = plan[i];
@@ -281,6 +297,16 @@ async function main() {
 
   await settle(e1.event.id);
   await settle(e2.event.id);
+
+  await prisma.notification.create({
+    data: {
+      userId: member.id,
+      eventId: e2.event.id,
+      title: "Funeral contribution due",
+      message: `A funeral has been announced in Demo Ward 2. Your household's contribution is R12.00 for FE-${YEAR}-002 (Demo funeral event 2). You can pay online or at a participating shop from your Contributions page.`,
+      createdAt: e2Date,
+    },
+  });
 
   const counts = {
     wards: await prisma.ward.count(),
@@ -305,4 +331,7 @@ main()
     process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());
+
+
+
 

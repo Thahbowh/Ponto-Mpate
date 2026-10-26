@@ -48,6 +48,7 @@ model User {
   handoversRecorded     CashHandover[]
   membership      HouseholdMember?
   paymentAttempts PaymentAttempt[]
+  notifications Notification[]
 }
 
 // Single-row table (id is always 1) for prototype settings.
@@ -97,6 +98,8 @@ model Household {
 
   @@index([wardId])
   members HouseholdMember[]
+  houseNumber String? @db.VarChar(20)
+  funeralsHeld FuneralEvent[]
 }
 
 model FuneralEvent {
@@ -117,6 +120,9 @@ model FuneralEvent {
   obligations   ContributionObligation[]
 
   @@index([homeWardId])
+  bereavedHouseholdId String?
+  bereavedHousehold   Household? @relation(fields: [bereavedHouseholdId], references: [id], onDelete: Restrict)
+  notifications Notification[]
 }
 
 model EventEligibleWard {
@@ -288,4 +294,23 @@ model VoucherTransaction {
 
   @@index([obligationId])
   @@index([settlementStatus])
+}
+
+
+
+
+// An in-app message to a member, for example when a funeral is announced in their ward.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  eventId   String?
+  title     String    @db.VarChar(120)
+  message   String    @db.VarChar(500)
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  user  User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  event FuneralEvent? @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  @@index([userId, readAt])
 }

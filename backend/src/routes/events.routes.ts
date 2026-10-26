@@ -12,6 +12,7 @@ const createSchema = z.object({
   title: z.string().trim().min(3).max(120), // neutral label only, no personal details
   eventDate: z.coerce.date(),
   homeWardId: z.string().min(1),
+  bereavedHouseholdId: z.string().min(1, "Choose the household holding the funeral"),
   contributionAmount: z.coerce.number().positive().max(100000).optional(),
 });
 
@@ -30,25 +31,31 @@ router.get("/", async (_req, res, next) => {
   }
 });
 
+// Rule: only households in the funeral's own ward pay, the household holding the funeral is exempt,
+// and the members of the paying households (that ward only) are sent a message.
 router.post("/", authorize("ADMIN"), async (req, res, next) => {
   try {
     const input = createSchema.parse(req.body);
 
-    const homeWard = await prisma.ward.findUnique({
-      where: { id: input.homeWardId },
-      include: { neighbours: { include: { neighbour: true } } },
-    });
+    const homeWard = await prisma.ward.findUnique({ where: { id: input.homeWardId } });
     if (!homeWard || !homeWard.isActive) {
       return res
         .status(400)
         .json({ success: false, error: { message: "Home ward does not exist or is inactive" } });
     }
 
-    // Eligible wards = home ward + its active neighbours
-    const eligibleWardIds = [
-      homeWard.id,
-      ...homeWard.neighbours.filter((n) => n.neighbour.isActive).map((n) => n.neighbourId),
-    ];
+    const bereaved = await prisma.household.findFirst({
+      where: { id: input.bereavedHouseholdId, wardId: homeWard.id, isActive: true },
+      select: { id: true, reference: true, householdName: true },
+    });
+    if (!bereaved) {
+      return res.status(400).json({
+        success: false,
+        error: { message: "The household holding the funeral must be an active household in the home ward" },
+      });
+    }
+
+    const eligibleWardIds = [homeWard.id];
 
     // The server decides the amount: explicit value, otherwise the scheme default
     let amount: Prisma.Decimal;
@@ -66,19 +73,19 @@ router.post("/", authorize("ADMIN"), async (req, res, next) => {
     }
 
     const households = await prisma.household.findMany({
-      where: { wardId: { in: eligibleWardIds }, isActive: true },
+      where: { wardId: homeWard.id, isActive: true, id: { not: bereaved.id } },
       select: { id: true },
     });
     if (households.length === 0) {
       return res.status(400).json({
         success: false,
-        error: { message: "No active households found in the eligible wards" },
+        error: { message: "There are no other active households in this ward to contribute" },
       });
     }
 
     const year = input.eventDate.getFullYear();
 
-    const event = await prisma.$transaction(async (tx) => {
+    const outcome = await prisma.$transaction(async (tx) => {
       const count = await tx.funeralEvent.count({
         where: { reference: { startsWith: `FE-${year}-` } },
       });
@@ -91,6 +98,7 @@ router.post("/", authorize("ADMIN"), async (req, res, next) => {
           eventDate: input.eventDate,
           contributionAmount: amount,
           homeWardId: input.homeWardId,
+          bereavedHouseholdId: bereaved.id,
           createdById: req.user!.id,
         },
       });
@@ -107,6 +115,26 @@ router.post("/", authorize("ADMIN"), async (req, res, next) => {
         })),
       });
 
+      // Message the approved members of the paying households in this ward, and nobody else
+      const householdIds = households.map((h) => h.id);
+      const members = await tx.householdMember.findMany({
+        where: { status: "APPROVED", householdId: { in: householdIds } },
+        select: { userId: true, householdId: true },
+      });
+      const userIds = [...new Set(members.map((m) => m.userId))];
+      if (userIds.length > 0) {
+        await tx.notification.createMany({
+          data: userIds.map((userId) => ({
+            userId,
+            eventId: created.id,
+            title: "Funeral contribution due",
+            message: `A funeral has been announced in ${homeWard.name}. Your household's contribution is R${amount.toFixed(2)} for ${reference} (${input.title}). You can pay online or at a participating shop from your Contributions page.`,
+          })),
+        });
+      }
+      const covered = new Set(members.map((m) => m.householdId));
+      const householdsWithoutMember = householdIds.filter((id) => !covered.has(id)).length;
+
       await tx.auditLog.create({
         data: {
           userId: req.user!.id,
@@ -115,16 +143,20 @@ router.post("/", authorize("ADMIN"), async (req, res, next) => {
           entityId: created.id,
           details: {
             reference,
-            eligibleWardIds,
+            ward: homeWard.name,
+            exemptHousehold: bereaved.reference,
             households: households.length,
             contributionAmount: amount.toFixed(2),
+            membersNotified: userIds.length,
+            householdsWithoutMember,
           },
         },
       });
 
-      return created;
+      return { created, membersNotified: userIds.length, householdsWithoutMember };
     });
 
+    const event = outcome.created;
     res.status(201).json({
       success: true,
       data: {
@@ -134,9 +166,15 @@ router.post("/", authorize("ADMIN"), async (req, res, next) => {
         eventDate: event.eventDate,
         status: event.status,
         contributionAmount: amount.toFixed(2),
+        ward: homeWard.name,
         eligibleWards: eligibleWardIds.length,
         households: households.length,
         expectedTotal: amount.mul(households.length).toFixed(2),
+        exemptHousehold: { reference: bereaved.reference, householdName: bereaved.householdName },
+        messages: {
+          membersNotified: outcome.membersNotified,
+          householdsWithoutMember: outcome.householdsWithoutMember,
+        },
       },
     });
   } catch (err) {
@@ -151,6 +189,7 @@ router.get("/:id/obligations", async (req, res, next) => {
       include: {
         homeWard: { select: { id: true, name: true } },
         eligibleWards: { include: { ward: { select: { id: true, name: true } } } },
+        bereavedHousehold: { select: { reference: true, householdName: true } },
       },
     });
     if (!event) {
@@ -172,6 +211,7 @@ router.get("/:id/obligations", async (req, res, next) => {
       },
       orderBy: { household: { reference: "asc" } },
     });
+    const messagesSent = await prisma.notification.count({ where: { eventId: event.id } });
 
     const zero = new Prisma.Decimal(0);
     let expected = zero;
@@ -204,6 +244,8 @@ router.get("/:id/obligations", async (req, res, next) => {
           contributionAmount: event.contributionAmount.toFixed(2),
           homeWard: event.homeWard,
           eligibleWards: event.eligibleWards.map((e) => e.ward),
+          bereavedHousehold: event.bereavedHousehold,
+          messagesSent,
         },
         summary: {
           households: obligations.length,

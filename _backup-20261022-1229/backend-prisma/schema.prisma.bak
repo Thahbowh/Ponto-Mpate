@@ -1,0 +1,178 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  VIEWER
+}
+
+enum EventStatus {
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum ObligationStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  UNDER_REVIEW
+}
+
+enum PaymentMethod {
+  CASH
+  EFT
+  OTHER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(ADMIN)
+  createdAt    DateTime @default(now())
+
+  eventsCreated FuneralEvent[]
+  paymentsMade  Payment[]
+  auditLogs     AuditLog[]
+}
+
+// Single-row table (id is always 1) for prototype settings.
+model Setting {
+  id                        Int      @id @default(1)
+  schemeName                String
+  defaultContributionAmount Decimal  @db.Decimal(10, 2)
+  updatedAt                 DateTime @updatedAt
+}
+
+model Ward {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  households    Household[]
+  neighbours    WardNeighbour[] @relation("WardToNeighbours")
+  neighbourOf   WardNeighbour[] @relation("NeighbourToWard")
+  homeEvents    FuneralEvent[]
+  eligibleFor   EventEligibleWard[]
+}
+
+// Each neighbour link is stored in both directions (A->B and B->A).
+model WardNeighbour {
+  wardId      String
+  neighbourId String
+
+  ward      Ward @relation("WardToNeighbours", fields: [wardId], references: [id], onDelete: Restrict)
+  neighbour Ward @relation("NeighbourToWard", fields: [neighbourId], references: [id], onDelete: Restrict)
+
+  @@id([wardId, neighbourId])
+}
+
+model Household {
+  id            String   @id @default(cuid())
+  reference     String   @unique // e.g. DEMO-W1-001
+  householdName String // label only, e.g. "Demo Dlamini household"
+  wardId        String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  ward        Ward                     @relation(fields: [wardId], references: [id], onDelete: Restrict)
+  obligations ContributionObligation[]
+
+  @@index([wardId])
+}
+
+model FuneralEvent {
+  id                 String      @id @default(cuid())
+  reference          String      @unique // e.g. FE-2026-001
+  title              String // neutral label, no personal details
+  eventDate          DateTime
+  status             EventStatus @default(ACTIVE)
+  contributionAmount Decimal     @db.Decimal(10, 2) // snapshot of the amount per household
+  homeWardId         String
+  createdById        String
+  createdAt          DateTime    @default(now())
+
+  homeWard      Ward                     @relation(fields: [homeWardId], references: [id], onDelete: Restrict)
+  createdBy     User                     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  eligibleWards EventEligibleWard[]
+  obligations   ContributionObligation[]
+
+  @@index([homeWardId])
+}
+
+model EventEligibleWard {
+  eventId String
+  wardId  String
+
+  event FuneralEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  ward  Ward         @relation(fields: [wardId], references: [id], onDelete: Restrict)
+
+  @@id([eventId, wardId])
+}
+
+model ContributionObligation {
+  id          String           @id @default(cuid())
+  eventId     String
+  householdId String
+  amountDue   Decimal          @db.Decimal(10, 2)
+  status      ObligationStatus @default(UNPAID)
+  createdAt   DateTime         @default(now())
+
+  event     FuneralEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  household Household    @relation(fields: [householdId], references: [id], onDelete: Restrict)
+  payments  Payment[]
+
+  @@unique([eventId, householdId]) // one obligation per household per event
+  @@index([householdId])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  obligationId   String
+  amount         Decimal       @db.Decimal(10, 2)
+  method         PaymentMethod
+  paidAt         DateTime      @default(now())
+  recordedById   String
+  idempotencyKey String        @unique // blocks accidental duplicate submissions
+  createdAt      DateTime      @default(now())
+
+  obligation ContributionObligation @relation(fields: [obligationId], references: [id], onDelete: Restrict)
+  recordedBy User                   @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+  receipt    Receipt?
+
+  @@index([obligationId])
+}
+
+model Receipt {
+  id        String   @id @default(cuid())
+  reference String   @unique
+  paymentId String   @unique
+  issuedAt  DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // e.g. PAYMENT_RECORDED
+  entityType String
+  entityId   String
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+}

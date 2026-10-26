@@ -10,6 +10,12 @@ router.use(authenticate);
 const householdSchema = z.object({
   householdName: z.string().trim().min(2).max(120),
   wardId: z.string().min(1),
+  houseNumber: z
+    .string()
+    .trim()
+    .min(1, "Enter the house number")
+    .max(20, "Use at most 20 characters")
+    .regex(/^[A-Za-z0-9 \/.\-]+$/, "Use letters, numbers, spaces, / or - only"),
   reference: z.string().trim().min(3).max(40).optional(),
 });
 
@@ -25,6 +31,7 @@ router.get("/", async (req, res, next) => {
           ? {
               OR: [
                 { householdName: { contains: search } },
+                { houseNumber: { contains: search } },
                 { reference: { contains: search } },
               ],
             }
@@ -65,7 +72,12 @@ router.post("/", authorize("ADMIN"), async (req, res, next) => {
     const reference = input.reference ?? `HH-${String(count + 1).padStart(4, "0")}`;
 
     const household = await prisma.household.create({
-      data: { householdName: input.householdName, wardId: input.wardId, reference },
+      data: {
+        householdName: input.householdName,
+        wardId: input.wardId,
+        houseNumber: input.houseNumber,
+        reference,
+      },
       include: { ward: { select: { id: true, name: true } } },
     });
     res.status(201).json({ success: true, data: household });

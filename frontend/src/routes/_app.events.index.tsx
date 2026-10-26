@@ -5,14 +5,15 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
 import { formatDate, formatRand } from "@/lib/formatters";
-import type { EventListItem, Ward } from "@/types/api";
+import type { EventListItem, Household, Ward } from "@/types/api";
 import { FormField, inputClass } from "@/components/ui/FormField";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/States";
+import { CloseEventButton } from "@/features/events/CloseEventButton";
 
 export const Route = createFileRoute("/_app/events/")({
   component: EventsPage,
-  head: () => ({ meta: [{ title: "Funeral events — Ponto Mpate" }] }),
+  head: () => ({ meta: [{ title: "Funeral events - Ponto Mpate" }] }),
 });
 
 interface CreatedEvent {
@@ -22,9 +23,12 @@ interface CreatedEvent {
   eventDate: string;
   status: string;
   contributionAmount: string;
+  ward: string;
   eligibleWards: number;
   households: number;
   expectedTotal: string;
+  exemptHousehold: { reference: string; householdName: string } | null;
+  messages: { membersNotified: number; householdsWithoutMember: number };
 }
 
 const buttonClass =
@@ -43,8 +47,8 @@ function EventsPage() {
       <header>
         <h1 className="font-display text-3xl font-semibold text-ink">Funeral events</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Each event generates one contribution for every participating household. The server decides
-          who takes part.
+          Each event asks every household in the funeral&apos;s ward to contribute, except the household holding the
+          funeral. Only the members of that ward are messaged.
         </p>
       </header>
 
@@ -54,7 +58,7 @@ function EventsPage() {
         ) : wards.error ? (
           <ErrorState message={wards.error} onRetry={wards.refetch} />
         ) : (
-          <LoadingState label="Loading wards…" />
+          <LoadingState label="Loading wards..." />
         )
       ) : (
         <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
@@ -78,7 +82,7 @@ function EventsPage() {
         </FormField>
       </div>
 
-      {events.loading ? <LoadingState label="Loading events…" /> : null}
+      {events.loading && !events.data ? <LoadingState label="Loading events..." /> : null}
       {events.error ? <ErrorState message={events.error} onRetry={events.refetch} /> : null}
 
       {events.data ? (
@@ -95,7 +99,7 @@ function EventsPage() {
                   <div>
                     <p className="font-semibold text-ink">{e.title}</p>
                     <p className="text-xs text-slate-500">
-                      {e.reference} · {formatDate(e.eventDate)}
+                      {e.reference} - {formatDate(e.eventDate)}
                     </p>
                   </div>
                   <StatusBadge status={e.status} />
@@ -119,8 +123,15 @@ function EventsPage() {
                   params={{ eventId: e.id }}
                   className="mt-4 inline-block text-sm font-semibold text-ink underline decoration-gold decoration-2 underline-offset-4"
                 >
-                  View event →
+                  View event &rarr;
                 </Link>
+                <CloseEventButton
+                  eventId={e.id}
+                  reference={e.reference}
+                  title={e.title}
+                  status={e.status}
+                  onClosed={events.refetch}
+                />
               </li>
             ))}
           </ul>
@@ -135,11 +146,29 @@ function CreateEventForm({ wards, onCreated }: { wards: Ward[]; onCreated: () =>
   const [title, setTitle] = useState("");
   const [eventDate, setEventDate] = useState(() => new Date().toLocaleDateString("en-CA"));
   const [homeWardId, setHomeWardId] = useState("");
+  const [bereavedId, setBereavedId] = useState("");
   const [amount, setAmount] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState("");
   const [created, setCreated] = useState<CreatedEvent | null>(null);
+
+  // The households of the chosen ward fill the "household holding the funeral" list
+  const households = useApi<Household[]>(
+    homeWardId ? `/households?wardId=${encodeURIComponent(homeWardId)}` : null
+  );
+  const wardHouseholds = (households.data ?? []).filter((h) => h.isActive);
+  const wardName = activeWards.find((w) => w.id === homeWardId)?.name ?? "";
+
+  const placeholder = !homeWardId
+    ? "Choose the home ward first"
+    : households.loading
+      ? "Loading households..."
+      : households.error
+        ? "Could not load households"
+        : wardHouseholds.length === 0
+          ? "No active households in this ward"
+          : "Choose the household...";
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -152,6 +181,7 @@ function CreateEventForm({ wards, onCreated }: { wards: Ward[]; onCreated: () =>
     if (title.trim().length < 3) errs.title = "Enter a short neutral label (at least 3 characters).";
     if (!eventDate) errs.eventDate = "Choose the event date.";
     if (!homeWardId) errs.homeWardId = "Choose the home ward.";
+    if (homeWardId && !bereavedId) errs.bereavedHouseholdId = "Choose the household holding the funeral.";
     const cleanAmount = amount.trim().replace(",", ".");
     if (cleanAmount && (!Number.isFinite(Number(cleanAmount)) || Number(cleanAmount) <= 0)) {
       errs.contributionAmount = "Enter an amount greater than zero, or leave it blank.";
@@ -169,12 +199,14 @@ function CreateEventForm({ wards, onCreated }: { wards: Ward[]; onCreated: () =>
           title: title.trim(),
           eventDate,
           homeWardId,
+          bereavedHouseholdId: bereavedId,
           ...(cleanAmount ? { contributionAmount: Number(cleanAmount) } : {}),
         },
       });
       setCreated(result);
       setTitle("");
       setAmount("");
+      setBereavedId("");
       onCreated();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -195,8 +227,8 @@ function CreateEventForm({ wards, onCreated }: { wards: Ward[]; onCreated: () =>
         Create a funeral event
       </h2>
       <p className="mt-1 text-sm text-slate-600">
-        Use a neutral label such as &ldquo;Demo funeral event 3&rdquo;. Please do not enter the name or
-        personal details of the person who has died.
+        Use a neutral label such as &ldquo;Demo funeral event 3&rdquo;. Please do not enter the name or personal
+        details of the person who has died.
       </p>
 
       <form onSubmit={onSubmit} noValidate className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -228,23 +260,59 @@ function CreateEventForm({ wards, onCreated }: { wards: Ward[]; onCreated: () =>
           label="Home ward"
           htmlFor="ev-ward"
           error={fieldErrors.homeWardId}
-          hint="The server adds the neighbouring wards that also contribute."
+          hint="Only households in this ward pay, and only the members of this ward are messaged."
         >
           <select
             id="ev-ward"
             value={homeWardId}
-            onChange={(e) => setHomeWardId(e.target.value)}
+            onChange={(e) => {
+              setHomeWardId(e.target.value);
+              setBereavedId("");
+            }}
             aria-invalid={Boolean(fieldErrors.homeWardId)}
             aria-describedby={fieldErrors.homeWardId ? "ev-ward-error" : "ev-ward-hint"}
             className={inputClass}
           >
-            <option value="">Choose a ward…</option>
+            <option value="">Choose a ward...</option>
             {activeWards.map((w) => (
               <option key={w.id} value={w.id}>
                 {w.name}
               </option>
             ))}
           </select>
+        </FormField>
+
+        <FormField
+          label="Household holding the funeral"
+          htmlFor="ev-bereaved"
+          error={fieldErrors.bereavedHouseholdId}
+          hint="This household is exempt from paying. Everyone else in the ward pays."
+        >
+          <select
+            id="ev-bereaved"
+            value={bereavedId}
+            onChange={(e) => setBereavedId(e.target.value)}
+            disabled={!homeWardId || households.loading || wardHouseholds.length === 0}
+            aria-invalid={Boolean(fieldErrors.bereavedHouseholdId)}
+            aria-describedby={fieldErrors.bereavedHouseholdId ? "ev-bereaved-error" : "ev-bereaved-hint"}
+            className={inputClass}
+          >
+            <option value="">{placeholder}</option>
+            {wardHouseholds.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.householdName} ({h.reference}
+                {h.houseNumber ? `, house ${h.houseNumber}` : ""})
+              </option>
+            ))}
+          </select>
+          {households.error ? (
+            <p role="alert" className="mt-1 text-sm text-red-700">
+              {households.error}{" "}
+              <button type="button" onClick={households.refetch} className="font-semibold underline">
+                Try again
+              </button>
+            </p>
+          ) : null}
         </FormField>
 
         <FormField
@@ -266,6 +334,12 @@ function CreateEventForm({ wards, onCreated }: { wards: Ward[]; onCreated: () =>
         </FormField>
 
         <div className="space-y-3 sm:col-span-2">
+          {bereavedId && wardHouseholds.length > 1 ? (
+            <p className="text-sm text-slate-600">
+              {wardHouseholds.length - 1} household{wardHouseholds.length - 1 === 1 ? "" : "s"} in {wardName} will be
+              asked to contribute, and their members will be messaged.
+            </p>
+          ) : null}
           {formError ? (
             <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {formError}
@@ -277,26 +351,33 @@ function CreateEventForm({ wards, onCreated }: { wards: Ward[]; onCreated: () =>
                 {created.reference} created: {created.title}
               </p>
               <p className="mt-1">
-                {created.households} household{created.households === 1 ? "" : "s"} across{" "}
-                {created.eligibleWards} ward{created.eligibleWards === 1 ? "" : "s"}, each owing{" "}
+                {created.households} household{created.households === 1 ? "" : "s"} in {created.ward}, each owing{" "}
                 {formatRand(created.contributionAmount)}. Expected total: {formatRand(created.expectedTotal)}.
+                {created.exemptHousehold
+                  ? ` ${created.exemptHousehold.householdName} (${created.exemptHousehold.reference}) is exempt.`
+                  : ""}
+              </p>
+              <p className="mt-1">
+                Messages: {created.messages.membersNotified} member
+                {created.messages.membersNotified === 1 ? "" : "s"} of {created.ward} messaged.{" "}
+                {created.messages.householdsWithoutMember > 0
+                  ? `${created.messages.householdsWithoutMember} paying household${created.messages.householdsWithoutMember === 1 ? " has" : "s have"} no member account yet, so nobody could be messaged for ${created.messages.householdsWithoutMember === 1 ? "it" : "them"}.`
+                  : "Every paying household has a member who was messaged."}
               </p>
               <Link
                 to="/events/$eventId"
                 params={{ eventId: created.id }}
                 className="mt-2 inline-block font-semibold underline"
               >
-                View event →
+                View event &rarr;
               </Link>
             </div>
           ) : null}
           <button type="submit" disabled={submitting} className={buttonClass}>
-            {submitting ? "Creating…" : "Create event and generate contributions"}
+            {submitting ? "Creating..." : "Create event and message the ward"}
           </button>
         </div>
       </form>
     </section>
   );
 }
-
-

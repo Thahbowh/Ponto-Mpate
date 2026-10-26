@@ -139,13 +139,13 @@ function HouseholdsTab({
       )}
 
       <section aria-label="Find households" className="grid gap-3 sm:grid-cols-3">
-        <FormField label="Search" htmlFor="hh-search" hint="Household name or reference">
+        <FormField label="Search" htmlFor="hh-search" hint="Household name, house number or reference">
           <input
             id="hh-search"
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="e.g. Dlamini or DEMO-W1-001"
+            placeholder="e.g. Dlamini, 12 or DEMO-W1-001"
             className={inputClass}
           />
         </FormField>
@@ -208,6 +208,7 @@ function HouseholdsTab({
                     <th scope="col" className="px-4 py-3">Reference</th>
                     <th scope="col" className="px-4 py-3">Household</th>
                     <th scope="col" className="px-4 py-3">Ward</th>
+                    <th scope="col" className="px-4 py-3">House no.</th>
                     <th scope="col" className="px-4 py-3">Status</th>
                   </tr>
                 </thead>
@@ -217,6 +218,7 @@ function HouseholdsTab({
                       <td className="px-4 py-3 font-mono text-xs text-slate-700">{h.reference}</td>
                       <td className="px-4 py-3 font-medium text-ink">{h.householdName}</td>
                       <td className="px-4 py-3 text-slate-700">{h.ward.name}</td>
+                      <td className="px-4 py-3 text-slate-700">{h.houseNumber ?? "-"}</td>
                       <td className="px-4 py-3"><ActiveBadge active={h.isActive} /></td>
                     </tr>
                   ))}
@@ -233,7 +235,7 @@ function HouseholdsTab({
                     <ActiveBadge active={h.isActive} />
                   </div>
                   <p className="mt-1 font-mono text-xs text-slate-600">{h.reference}</p>
-                  <p className="mt-1 text-sm text-slate-700">{h.ward.name}</p>
+                  <p className="mt-1 text-sm text-slate-700">{h.ward.name}{h.houseNumber ? ` - house ${h.houseNumber}` : ""}</p>
                 </li>
               ))}
             </ul>
@@ -254,6 +256,7 @@ function RegisterHouseholdForm({
   const activeWards = wards.filter((w) => w.isActive);
   const [householdName, setHouseholdName] = useState("");
   const [wardId, setWardId] = useState("");
+  const [houseNumber, setHouseNumber] = useState("");
   const [reference, setReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -272,6 +275,7 @@ function RegisterHouseholdForm({
       errs.householdName = "Enter the household's name (at least 2 characters).";
     }
     if (!wardId) errs.wardId = "Choose a ward.";
+    if (houseNumber.trim().length < 1) errs.houseNumber = "Enter the house number.";
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
       return;
@@ -284,11 +288,13 @@ function RegisterHouseholdForm({
         body: {
           householdName: householdName.trim(),
           wardId,
+          houseNumber: houseNumber.trim(),
           ...(reference.trim() ? { reference: reference.trim() } : {}),
         },
       });
       setSuccess(`Registered ${created.householdName} (${created.reference}) in ${created.ward.name}.`);
       setHouseholdName("");
+      setHouseNumber("");
       setReference("");
       onRegistered();
     } catch (err) {
@@ -313,7 +319,7 @@ function RegisterHouseholdForm({
         Use a neutral label for the household. Please do not enter personal details beyond what is needed.
       </p>
 
-      <form onSubmit={onSubmit} noValidate className="mt-4 grid gap-4 sm:grid-cols-3">
+      <form onSubmit={onSubmit} noValidate className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <FormField label="Household name" htmlFor="hh-name" error={fieldErrors.householdName}>
           <input
             id="hh-name"
@@ -345,6 +351,21 @@ function RegisterHouseholdForm({
         </FormField>
 
         <FormField
+          label="House number"
+          htmlFor="hh-house"
+          error={fieldErrors.houseNumber}
+          hint="For example 12 or 345A"
+        >
+          <input
+            id="hh-house"
+            value={houseNumber}
+            onChange={(e) => setHouseNumber(e.target.value)}
+            aria-invalid={Boolean(fieldErrors.houseNumber)}
+            aria-describedby={fieldErrors.houseNumber ? "hh-house-error" : "hh-house-hint"}
+            className={inputClass}
+          />
+        </FormField>
+        <FormField
           label="Reference (optional)"
           htmlFor="hh-ref"
           error={fieldErrors.reference}
@@ -361,7 +382,7 @@ function RegisterHouseholdForm({
           />
         </FormField>
 
-        <div className="space-y-3 sm:col-span-3">
+        <div className="space-y-3 sm:col-span-2 lg:col-span-4">
           {formError ? (
             <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {formError}
@@ -496,3 +517,4 @@ function CreateWardForm({ onCreated }: { onCreated: () => void }) {
     </section>
   );
 }
+

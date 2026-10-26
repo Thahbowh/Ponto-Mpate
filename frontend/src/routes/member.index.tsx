@@ -11,6 +11,8 @@ import { StatCard } from "@/components/ui/StatCard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ErrorState, LoadingState } from "@/components/ui/States";
 import { PayButton } from "@/features/member/PayButton";
+import { ShopReference } from "@/features/member/ShopReference";
+import { MessagesPanel } from "@/features/member/MessagesPanel";
 
 export const Route = createFileRoute("/member/")({
   component: MemberHome,
@@ -38,6 +40,8 @@ function MemberHome() {
           Keep track of your household&apos;s contributions to the community.
         </p>
       </header>
+
+      <MessagesPanel />
 
       {me.loading && !me.data ? <LoadingState label="Loading your account..." /> : null}
       {me.error ? <ErrorState message={me.error} onRetry={me.refetch} /> : null}
@@ -127,6 +131,7 @@ function MemberHome() {
                             <PayButton obligationId={i.obligationId} />
                           )}
                         </div>
+                        <ShopReference obligationId={i.obligationId} existing={i.payReference} amount={i.outstanding} />
                       </li>
                     ))}
                   </ul>
@@ -254,3 +259,5 @@ function JoinHouseholdForm({ declined, onJoined }: { declined: boolean; onJoined
     </section>
   );
 }
+
+

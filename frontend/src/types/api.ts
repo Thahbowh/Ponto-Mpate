@@ -21,6 +21,7 @@ export interface Household {
   id: string;
   reference: string;
   householdName: string;
+  houseNumber: string | null;
   wardId: string;
   isActive: boolean;
   ward: { id: string; name: string };
@@ -61,6 +62,8 @@ export interface EventObligations {
     contributionAmount: string;
     homeWard: { id: string; name: string };
     eligibleWards: { id: string; name: string }[];
+    bereavedHousehold: { reference: string; householdName: string } | null;
+    messagesSent: number;
   };
   summary: {
     households: number;
@@ -136,6 +139,17 @@ export interface Dashboard {
   events: DashboardEvent[];
   wards: DashboardWard[];
   recentPayments: RecentPayment[];
+
+  community: {
+    totalWards: number;
+    totalHouseholds: number;
+  };
+
+  totals: Totals;
+  allEventsTotals: Totals;
+  events: DashboardEvent[];
+  wards: DashboardWard[];
+  recentPayments: RecentPayment[];
 }
 
 export interface Reconciliation {
@@ -173,6 +187,9 @@ export interface Insights {
     | { available: false; reason: string }
     | { available: true; method: string; expectedCollectionRate: number; caveat: string };
 }
+
+
+
 
 
 

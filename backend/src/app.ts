@@ -16,6 +16,7 @@ import reconciliationRoutes from "./routes/reconciliation.routes";
 import insightsRoutes from "./routes/insights.routes";
 import membershipRoutes from "./routes/membership.routes";
 import memberRoutes from "./routes/member.routes";
+import memberNotificationRoutes from "./routes/memberNotifications.routes";
 import webhookRoutes from "./routes/webhooks.routes";
 import voucherWebhookRoutes from "./routes/voucherWebhook.routes";
 import ussdRoutes from "./routes/ussd.routes";
@@ -60,6 +61,7 @@ app.use("/api/v1/membership-requests", staffOnly, membershipRoutes);
 app.use("/api/v1/vouchers", staffOnly, voucherRoutes);
 
 // Member portal: members only, and only their own household's data
+app.use("/api/v1/member/notifications", authenticate, authorize("MEMBER"), memberNotificationRoutes);
 app.use("/api/v1/member", authenticate, authorize("MEMBER"), memberRoutes);
 
 // Provider notifications (signature checked inside) and the demo USSD service
@@ -70,3 +72,4 @@ app.use("/api/v1/ussd", ussdLimiter, ussdRoutes);
 app.use(errorHandler);
 
 export default app;
+
