@@ -114,7 +114,7 @@ router.post("/household/join", joinLimiter, async (req, res, next) => {
     }
 
     const household = await prisma.household.findFirst({
-      where: { reference: input.householdReference, wardId: input.wardId, isActive: true },
+      where: { reference: input.householdReference.replace(/\D/g, ""), wardId: input.wardId, isActive: true },
       include: { ward: { select: { id: true, name: true } } },
     });
     // Same answer whether the reference is wrong or belongs to another ward
@@ -193,7 +193,7 @@ router.get("/contributions", async (req, res, next) => {
         status: o.status,
         canPay: o.event.status === "ACTIVE" && outstanding.gt(0),
         pendingCheckout: o.attempts[0]?.reference ?? null,
-        payReference: o.payReference,
+        payReference: m.household.reference,
       };
     });
 
@@ -342,7 +342,7 @@ router.post("/contributions/:obligationId/shop-reference", async (req, res, next
       return res.status(409).json({ success: false, error: { message: "This contribution is already paid in full" } });
     }
 
-    const payReference = await ensurePayReference(obligation.id);
+    const payReference = m.household.reference;
     res.json({
       success: true,
       data: {
@@ -520,6 +520,7 @@ router.post("/checkout/:reference/demo-pay", async (req, res, next) => {
 });
 
 export default router;
+
 
 
 

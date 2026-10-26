@@ -35,6 +35,26 @@ function dbTarget(): string {
   }
 }
 
+/** Fixed, valid 9-digit references for the demo households, so the demo is repeatable. */
+function checkDigit(payload: string): number {
+  let sum = 0;
+  let double = true;
+  for (let i = payload.length - 1; i >= 0; i--) {
+    let d = Number(payload[i]);
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return (10 - (sum % 10)) % 10;
+}
+
+function demoReference(ward: number, index: number): string {
+  const payload = `40${ward + 1}0${index + 1}000`;
+  return payload + checkDigit(payload);
+}
 async function main() {
   if (!process.argv.includes("--yes")) {
     console.log(`This will DELETE ALL DATA in ${dbTarget()} and rebuild the demo.`);
@@ -46,9 +66,7 @@ async function main() {
   }
 
   const notDemo = await prisma.household.count({
-    where: {
-      NOT: [{ reference: { startsWith: "DEMO-" } }, { reference: { startsWith: "HH-" } }],
-    },
+    where: { NOT: { householdName: { startsWith: "Demo" } } },
   });
   if (notDemo > 0) {
     throw new Error(`Found ${notDemo} household(s) that do not look like demo data. Refusing to delete anything.`);
@@ -109,7 +127,7 @@ async function main() {
   for (let w = 0; w < WARDS.length; w++) {
     await prisma.household.createMany({
       data: WARDS[w].households.map((surname, i) => ({
-        reference: `DEMO-W${w + 1}-${String(i + 1).padStart(3, "0")}`,
+        reference: demoReference(w, i),
         householdName: `Demo ${surname} household`,
         houseNumber: String(10 + w * 20 + i * 2),
         wardId: wards[w].id,
@@ -118,7 +136,7 @@ async function main() {
   }
 
   // The demo member is already approved for one household
-  const memberHousehold = await prisma.household.findUniqueOrThrow({ where: { reference: "DEMO-W2-003" } });
+  const memberHousehold = await prisma.household.findUniqueOrThrow({ where: { reference: demoReference(1, 2) } });
   await prisma.householdMember.create({
     data: { userId: member.id, householdId: memberHousehold.id, status: "APPROVED", decidedAt: new Date() },
   });
@@ -127,7 +145,7 @@ async function main() {
   const member1 = await prisma.user.create({
     data: { email: "member.ward1@demo.example", name: "Demo Member (Ward 1)", passwordHash: await bcrypt.hash(memberPw, 10), role: "MEMBER" },
   });
-  const member1Household = await prisma.household.findUniqueOrThrow({ where: { reference: "DEMO-W1-002" } });
+  const member1Household = await prisma.household.findUniqueOrThrow({ where: { reference: demoReference(0, 1) } });
   await prisma.householdMember.create({
     data: { userId: member1.id, householdId: member1Household.id, status: "APPROVED", decidedAt: new Date() },
   });
@@ -261,7 +279,7 @@ async function main() {
   // Event 1: closed history. Ward 1 holds the funeral and the Zulu household is exempt, so 4 households pay.
   // 2 paid cash, 1 paid by transfer, 1 part payment. All cash handed over.
   const e1Date = daysAgo(40);
-  const e1 = await createEvent(`FE-${YEAR}-001`, "Demo funeral event 1", e1Date, "CLOSED", 0, "DEMO-W1-005");
+  const e1 = await createEvent(`FE-${YEAR}-001`, "Demo funeral event 1", e1Date, "CLOSED", 0, demoReference(0, 4));
   for (let i = 0; i < e1.refs.length; i++) {
     const ob = e1.byRef.get(e1.refs[i])!;
     const at = minutesAfter(e1Date, 60 * (i + 1));
@@ -285,10 +303,10 @@ async function main() {
   // Event 2: active. Ward 2 holds the funeral and the Tau household is exempt, so 4 households pay.
   // 1 paid cash and 1 part payment (cash), with no handover recorded yet. The demo member (Mohapi) still owes.
   const e2Date = daysAgo(10);
-  const e2 = await createEvent(`FE-${YEAR}-002`, "Demo funeral event 2", e2Date, "ACTIVE", 1, "DEMO-W2-005");
+  const e2 = await createEvent(`FE-${YEAR}-002`, "Demo funeral event 2", e2Date, "ACTIVE", 1, demoReference(1, 4));
   const plan: [string, string, "CASH" | "EFT"][] = [
-    ["DEMO-W2-001", "12.00", "CASH"],
-    ["DEMO-W2-002", "6.00", "CASH"],
+    [demoReference(1, 0), "12.00", "CASH"],
+    [demoReference(1, 1), "6.00", "CASH"],
   ];
   for (let i = 0; i < plan.length; i++) {
     const [ref, amount, method] = plan[i];
@@ -318,7 +336,10 @@ async function main() {
     users: await prisma.user.count(),
   };
   console.log("Demo rebuilt:", counts);
-  console.log("Sign in with:");
+    console.log("Household references (the same number is used to join a household and to pay at a shop):");
+  console.log("  Mohapi household (demo member, owes on event 2):", demoReference(1, 2));
+  console.log("  Ramokoena household (use for the live join demo):", demoReference(1, 3));
+  console.log("  Nkosi household (second demo member):", demoReference(0, 1));  console.log("Sign in with:");
   console.log("  admin@demo.example   (administrator)");
   console.log("  viewer@demo.example  (read only)");
   console.log("  member@demo.example  (household DEMO-W2-003)");
@@ -331,6 +352,7 @@ main()
     process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());
+
 
 
 

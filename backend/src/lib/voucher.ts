@@ -91,6 +91,7 @@ async function voucherServiceUserId(): Promise<string> {
 const eventSchema = z.object({
   providerReference: z.string().min(4).max(100),
   payReference: z.string().min(1).max(20),
+  eventReference: z.string().max(40).optional(),
   amount: z.string().regex(/^\d+(\.\d{1,2})?$/),
   fee: z.string().regex(/^\d+(\.\d{1,2})?$/),
 });
@@ -115,8 +116,26 @@ export async function applyVoucherConfirmation(evt: VoucherEvent): Promise<Vouch
   const ref = normaliseRef(evt.payReference);
   if (!isValidPayReference(ref)) return { outcome: "invalid_reference" };
 
-  const obligation = await prisma.contributionObligation.findUnique({ where: { payReference: ref } });
-  if (!obligation) return { outcome: "unknown_reference" };
+  // The reference belongs to the household. Work out which contribution is being paid.
+  const household = await prisma.household.findUnique({
+    where: { reference: ref },
+    select: { id: true, isActive: true },
+  });
+  if (!household || !household.isActive) return { outcome: "unknown_reference" };
+
+  const open = await prisma.contributionObligation.findMany({
+    where: { householdId: household.id, status: { not: "PAID" }, event: { status: "ACTIVE" } },
+    include: { event: { select: { reference: true } } },
+    orderBy: { event: { eventDate: "asc" } },
+  });
+  const obligation = evt.eventReference
+    ? open.find((o) => o.event.reference === evt.eventReference)
+    : open.length === 1
+      ? open[0]
+      : undefined;
+  if (!obligation) {
+    return { outcome: open.length > 1 && !evt.eventReference ? "ambiguous_contribution" : "no_open_contribution" };
+  }
 
   const gross = new Prisma.Decimal(evt.amount);
   const fee = new Prisma.Decimal(evt.fee);
@@ -249,10 +268,11 @@ export async function handleSignedVoucherNotification(
 }
 
 /** DEMO ONLY: plays the voucher provider by signing a confirmation, then verifies it like a real one. */
-export async function simulateVoucherProvider(payReference: string, amount: Prisma.Decimal) {
+export async function simulateVoucherProvider(payReference: string, amount: Prisma.Decimal, eventReference?: string) {
   const payload: VoucherEvent = {
     providerReference: `VCH-${crypto.randomBytes(5).toString("hex").toUpperCase()}`,
     payReference,
+    eventReference,
     amount: amount.toFixed(2),
     fee: feeFor(amount).toFixed(2),
   };
@@ -260,3 +280,15 @@ export async function simulateVoucherProvider(payReference: string, amount: Pris
   return handleSignedVoucherNotification(raw, sign(raw));
 }
 
+
+
+/** A new 9-digit household reference (8 random digits plus a check digit) that no other household uses. */
+export async function newHouseholdReference(): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const payload = String(crypto.randomInt(10_000_000, 100_000_000));
+    const ref = payload + luhnCheckDigit(payload);
+    const taken = await prisma.household.findUnique({ where: { reference: ref }, select: { id: true } });
+    if (!taken) return ref;
+  }
+  throw new Error("Could not generate a unique household reference");
+}
