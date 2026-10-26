@@ -47,3 +47,8 @@ export function newIdempotencyKey(): string {
   return crypto.randomUUID();
 }
 
+
+/** "482910375" -> "482 910 375". Household references are 9-digit numbers. */
+export function formatReference(ref: string): string {
+  return /^\d{9}$/.test(ref) ? ref.replace(/(\d{3})(?=\d)/g, "$1 ") : ref;
+}

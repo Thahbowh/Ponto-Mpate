@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useAuth } from "@/features/auth/AuthContext";
 import { api, ApiError } from "@/lib/api";
+import { formatReference } from "@/lib/formatters";
 import { useApi } from "@/lib/useApi";
 import type { Household, Ward } from "@/types/api";
 import { FormField, inputClass } from "@/components/ui/FormField";
@@ -145,7 +146,7 @@ function HouseholdsTab({
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="e.g. Dlamini, 12 or DEMO-W1-001"
+            placeholder="e.g. Dlamini, 12 or 402 030"
             className={inputClass}
           />
         </FormField>
@@ -215,7 +216,7 @@ function HouseholdsTab({
                 <tbody className="divide-y divide-slate-100">
                   {rows.map((h) => (
                     <tr key={h.id}>
-                      <td className="px-4 py-3 font-mono text-xs text-slate-700">{h.reference}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-700">{formatReference(h.reference)}</td>
                       <td className="px-4 py-3 font-medium text-ink">{h.householdName}</td>
                       <td className="px-4 py-3 text-slate-700">{h.ward.name}</td>
                       <td className="px-4 py-3 text-slate-700">{h.houseNumber ?? "-"}</td>
@@ -234,7 +235,7 @@ function HouseholdsTab({
                     <p className="font-semibold text-ink">{h.householdName}</p>
                     <ActiveBadge active={h.isActive} />
                   </div>
-                  <p className="mt-1 font-mono text-xs text-slate-600">{h.reference}</p>
+                  <p className="mt-1 font-mono text-xs text-slate-600">{formatReference(h.reference)}</p>
                   <p className="mt-1 text-sm text-slate-700">{h.ward.name}{h.houseNumber ? ` - house ${h.houseNumber}` : ""}</p>
                 </li>
               ))}
@@ -292,7 +293,7 @@ function RegisterHouseholdForm({
           ...(reference.trim() ? { reference: reference.trim() } : {}),
         },
       });
-      setSuccess(`Registered ${created.householdName} (${created.reference}) in ${created.ward.name}.`);
+      setSuccess(`Registered ${created.householdName} (${formatReference(created.reference)}) in ${created.ward.name}.`);
       setHouseholdName("");
       setHouseNumber("");
       setReference("");
@@ -365,22 +366,13 @@ function RegisterHouseholdForm({
             className={inputClass}
           />
         </FormField>
-        <FormField
-          label="Reference (optional)"
-          htmlFor="hh-ref"
-          error={fieldErrors.reference}
-          hint="Leave blank to generate one automatically."
-        >
-          <input
-            id="hh-ref"
-            value={reference}
-            onChange={(e) => setReference(e.target.value)}
-            aria-invalid={Boolean(fieldErrors.reference)}
-            aria-describedby={fieldErrors.reference ? "hh-ref-error" : "hh-ref-hint"}
-            placeholder="e.g. DEMO-W4-001"
-            className={inputClass}
-          />
-        </FormField>
+        <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          <p className="font-medium text-ink">Household reference</p>
+          <p className="mt-1">
+            Created automatically when you register the household. It is also the number the household uses to pay at
+            a shop.
+          </p>
+        </div>
 
         <div className="space-y-3 sm:col-span-2 lg:col-span-4">
           {formError ? (
@@ -517,4 +509,5 @@ function CreateWardForm({ onCreated }: { onCreated: () => void }) {
     </section>
   );
 }
+
 

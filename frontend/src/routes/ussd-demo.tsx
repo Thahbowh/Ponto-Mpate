@@ -138,10 +138,11 @@ function UssdDemo() {
         )}
 
         <p className="text-xs text-slate-500">
-          Try: reply 1, then the 9-digit reference from the member Contributions page, then 1 to confirm. The
+          Try: reply 1, then your 9-digit household reference (shown on the Contributions page), then 1 to confirm. The
           simulator never asks for a voucher PIN.
         </p>
       </div>
     </div>
   );
 }
+

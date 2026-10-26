@@ -66,7 +66,7 @@ export function ShopReference({
       ) : null}
       {open && ref ? (
         <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-800">
-          <p className="text-xs uppercase tracking-wide text-slate-500">Your payment reference</p>
+          <p className="text-xs uppercase tracking-wide text-slate-500">Your household reference</p>
           <p className="font-mono text-2xl font-bold tracking-widest text-ink">{group(ref)}</p>
           <ol className="mt-3 list-decimal space-y-1 pl-5">
             <li>Take this reference and {formatRand(amount)} in cash to a participating shop.</li>
@@ -84,3 +84,4 @@ export function ShopReference({
     </div>
   );
 }
+

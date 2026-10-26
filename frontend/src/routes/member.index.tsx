@@ -4,7 +4,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAuth } from "@/features/auth/AuthContext";
 import { api, ApiError } from "@/lib/api";
 import { useApi } from "@/lib/useApi";
-import { formatRand, formatDate } from "@/lib/formatters";
+import { formatRand, formatDate, formatReference } from "@/lib/formatters";
 import type { MemberContributions, MemberMe, MemberWard } from "@/types/member";
 import { FormField, inputClass } from "@/components/ui/FormField";
 import { StatCard } from "@/components/ui/StatCard";
@@ -73,7 +73,7 @@ function MemberHome() {
             <p className="text-xs uppercase tracking-wide text-slate-500">Your household</p>
             <p className="text-lg font-semibold text-ink">{me.data.membership.household.householdName}</p>
             <p className="text-sm text-slate-600">
-              {me.data.membership.household.reference} - {me.data.membership.household.ward.name}
+              Reference {formatReference(me.data.membership.household.reference)} - {me.data.membership.household.ward.name}
             </p>
           </section>
 
@@ -232,7 +232,7 @@ function JoinHouseholdForm({ declined, onJoined }: { declined: boolean; onJoined
             label="Household reference"
             htmlFor="join-ref"
             error={fieldErrors.householdReference}
-            hint="For example DEMO-W2-004"
+            hint="The 9-digit number your ward administrator gave you"
           >
             <input
               id="join-ref"
@@ -259,5 +259,6 @@ function JoinHouseholdForm({ declined, onJoined }: { declined: boolean; onJoined
     </section>
   );
 }
+
 
 
